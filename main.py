@@ -37,84 +37,95 @@ def main() -> None:
 
 
 def initialize_new_case(update: Update, context: CallbackContext) -> None:
-    if update.message == None:
-        return
+    if update.message is not None:
+        # Forward message if it is a reply and in the channel
 
-    chat_id = update.message.chat.id
-    message_id = update.message.message_id
-    date = update.message.date
+        chat_id = update.message.chat.id
+        message_id = update.message.message_id
+        date = update.message.date
 
-    global current_chat
-    current_chat = {
-        "chat_id": chat_id,
-        "message_id": message_id,
-        "created_at": date,
-    }
+        global current_chat
+        current_chat = {
+            "chat_id": chat_id,
+            "message_id": message_id,
+            "created_at": date,
+        }
 
-    """
-    SESSION
+        """
+        SESSION
 
-    The hashmap (aka object) is to store the people’s chat id and mimic like a session in runtime.
-    """
-    if chat_id not in hashmap:
-        current_chat["session_id"] = generate_session_id()
-    else:
-        last_message_date = hashmap[chat_id]["created_at"]
-        if get_mins_from(last_message_date) >= SESSION_EXPIRE_MINS:
+        The hashmap (aka object) is to store the people’s chat id and mimic like a session in runtime.
+        """
+        if chat_id not in hashmap:
             current_chat["session_id"] = generate_session_id()
         else:
-            current_chat["session_id"] = hashmap[chat_id]["session_id"]
+            last_message_date = hashmap[chat_id]["created_at"]
+            if get_mins_from(last_message_date) >= SESSION_EXPIRE_MINS:
+                current_chat["session_id"] = generate_session_id()
+            else:
+                current_chat["session_id"] = hashmap[chat_id]["session_id"]
 
-    hashmap[chat_id] = current_chat
+        hashmap[chat_id] = current_chat
 
-    response = detect_intent_texts(
-        config("PROJECT_ID"),
-        current_chat["session_id"],
-        update.message.text,
-        config("DIALOGFLOW_LANGUAGE_CODE"),
-    )
-
-    """
-    Intents Handlers
-
-    To map intents easily based on their needs for reply_markups
-    """
-    intents_without_reply_markups = [
-        "direct:employee_benefits",
-        "direct:claim_medical_bills",
-        "direct:hr_application_issues",
-        "direct:sunway_celcom_pkg",
-        "default_welcome_intent",
-        "leave_application",
-        "check_remaning_leaves",
-    ]
-
-    intents_with_reply_markups = {
-        "frequently_asked_questions": faq_keyboard(),
-    }
-
-    if response["intent"] in intents_without_reply_markups:
-        update.message.reply_text(response["message"], None)
-    elif response["intent"] in intents_with_reply_markups:
-        update.message.reply_text(
-            response["message"],
-            reply_markup=intents_with_reply_markups[response["intent"]],
+        response = detect_intent_texts(
+            config("PROJECT_ID"),
+            current_chat["session_id"],
+            update.message.text,
+            config("DIALOGFLOW_LANGUAGE_CODE"),
         )
 
-    if response["intent"] == "default_fallback_intent":
-        # Send reply to the user
-        context.bot.send_message(
-            chat_id=update.message.chat_id,
-            reply_to_message_id=update.message.message_id,
-            text="I'm really sorry for not being able to process your request. I'll forward your request to a live HR staff.",
-        )
+        """
+        Intents Handlers
 
-        # Forward the chat to HR channel
-        context.bot.forward_message(
-            chat_id="@demoHRchannel",
-            from_chat_id=update.message.chat_id,
-            message_id=update.message.message_id,
-        )
+        To map intents easily based on their needs for reply_markups
+        """
+        intents_without_reply_markups = [
+            "direct:employee_benefits",
+            "direct:claim_medical_bills",
+            "direct:hr_application_issues",
+            "direct:sunway_celcom_pkg",
+            "default_welcome_intent",
+            "leave_application",
+            "check_remaning_leaves",
+        ]
+
+        intents_with_reply_markups = {
+            "frequently_asked_questions": faq_keyboard(),
+        }
+
+        if response["intent"] in intents_without_reply_markups:
+            update.message.reply_text(response["message"], None)
+        elif response["intent"] in intents_with_reply_markups:
+            update.message.reply_text(
+                response["message"],
+                reply_markup=intents_with_reply_markups[response["intent"]],
+            )
+
+        if response["intent"] == "default_fallback_intent":
+            # Send reply to the user
+            context.bot.send_message(
+                chat_id=update.message.chat_id,
+                reply_to_message_id=update.message.message_id,
+                text="I'm really sorry for not being able to process your request. I'll forward your request to a live HR staff.",
+            )
+
+            # Forward the chat to HR channel
+            context.bot.forward_message(
+                chat_id="@demoHRchannel",
+                from_chat_id=update.message.chat_id,
+                message_id=update.message.message_id,
+            )
+
+    else:
+        if (
+            update.channel_post.reply_to_message is not None
+            and update.channel_post.reply_to_message.forward_from is not None
+        ):
+            context.bot.forward_message(
+                chat_id=update.channel_post.reply_to_message.forward_from.id,
+                from_chat_id="@demoHRchannel",
+                message_id=update.channel_post.message_id,
+            )
 
 
 # Handler input from inline keyboard
