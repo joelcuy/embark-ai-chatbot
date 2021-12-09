@@ -11,7 +11,8 @@ from telegram.ext import (
     MessageHandler,
     Filters,
     CallbackContext,
-    CallbackQueryHandler, CommandHandler
+    CallbackQueryHandler,
+    CommandHandler,
 )
 
 # Env Variables Initialization
@@ -20,8 +21,8 @@ os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = config("SESSION_KEY_PATH")
 # Mock MongoDB
 hashmap = {}
 
-below_confidence_attempts = 0
 current_chat = {}
+
 
 def main() -> None:
     updater = Updater(config("BOT_TOKEN"))
@@ -30,12 +31,15 @@ def main() -> None:
     dispatcher.add_handler(
         MessageHandler(Filters.text & ~Filters.command, initialize_new_case)
     )
-    # updater.dispatcher.add_handler(CallbackQueryHandler(button))
+    dispatcher.add_handler(CallbackQueryHandler(inline_keyboard_handler))
     updater.start_polling()
     updater.idle()
 
 
 def initialize_new_case(update: Update, context: CallbackContext) -> None:
+    if update.message == None:
+        return
+
     chat_id = update.message.chat.id
     message_id = update.message.message_id
     date = update.message.date
@@ -47,8 +51,11 @@ def initialize_new_case(update: Update, context: CallbackContext) -> None:
         "created_at": date,
     }
 
-    # the hashmap (aka object) is to store the people’s chat id and mimic like a session once
-    # but once the local script restarts, it will be blank again, because it is only stored in runtime
+    """
+    SESSION
+
+    The hashmap (aka object) is to store the people’s chat id and mimic like a session in runtime.
+    """
     if chat_id not in hashmap:
         current_chat["session_id"] = generate_session_id()
     else:
@@ -60,10 +67,6 @@ def initialize_new_case(update: Update, context: CallbackContext) -> None:
 
     hashmap[chat_id] = current_chat
 
-    # For testing
-    print("session", current_chat["session_id"])
-
-    # Call function from detect_intets.py
     response = detect_intent_texts(
         config("PROJECT_ID"),
         current_chat["session_id"],
@@ -71,46 +74,35 @@ def initialize_new_case(update: Update, context: CallbackContext) -> None:
         config("DIALOGFLOW_LANGUAGE_CODE"),
     )
 
-    # For testing
-    print(response)
+    """
+    Intents Handlers
 
-    global below_confidence_attempts
-    if response["confidence_level"] < MINIMUM_CONFIDENCE_LEVEL:
-        below_confidence_attempts += 1
-    else:
-        below_confidence_attempts -= 1
+    To map intents easily based on their needs for reply_markups
+    """
+    intents_without_reply_markups = [
+        "direct:employee_benefits",
+        "direct:claim_medical_bills",
+        "direct:hr_application_issues",
+        "direct:sunway_celcom_pkg",
+        "default_welcome_intent",
+        "leave_application",
+        "check_remaning_leaves",
+    ]
 
-    # Default no inline keyboards if doesnt match one of the else if cases
-    reply_markup = None
-    global fallbackIntentCount
-    if response["intent"] == "default_welcome_intent":
-        fallbackIntentCount = 0
-        reply_markup = welcome_keyboard()
-        update.message.reply_text(response["message"], reply_markup=reply_markup)
+    intents_with_reply_markups = {
+        "frequently_asked_questions": faq_keyboard(),
+    }
 
-    elif response["intent"] == "employee_benefits":
-        fallbackIntentCount = 0
-        update.message.reply_text(response["message"], reply_markup=reply_markup)
+    if response["intent"] in intents_without_reply_markups:
+        update.message.reply_text(response["message"], None)
+    elif response["intent"] in intents_with_reply_markups:
+        update.message.reply_text(
+            response["message"],
+            reply_markup=intents_with_reply_markups[response["intent"]],
+        )
 
-    elif response["intent"] == "hr_application_system":
-        fallbackIntentCount = 0
-        update.message.reply_text(response["message"], reply_markup=reply_markup)
-
-    elif response["intent"] == "leave":
-        fallbackIntentCount = 0
-        reply_markup = leave_keyboard()
-        update.message.reply_text(response["message"], reply_markup=reply_markup)
-
-    elif response["intent"] == "medical":
-        fallbackIntentCount = 0
-        update.message.reply_text(response["message"], reply_markup=reply_markup)
-
-    elif response["intent"] == "sunway_celcom_pkg":
-        fallbackIntentCount = 0
-        update.message.reply_text(response["message"], reply_markup=reply_markup)
-
-    elif response["intent"] == "default_fallback_intent":
-        # send reply to the user
+    if response["intent"] == "default_fallback_intent":
+        # Send reply to the user
         context.bot.send_message(
             chat_id=update.message.chat_id,
             reply_to_message_id=update.message.message_id,
@@ -124,51 +116,57 @@ def initialize_new_case(update: Update, context: CallbackContext) -> None:
             message_id=update.message.message_id,
         )
 
-# # Action after clicking buttons
-# def button(update: Update, context: CallbackContext) -> None:
-#     """Parses the CallbackQuery and updates the message text."""
-#     query = update.callback_query
 
-#     # CallbackQueries need to be answered, even if no notification to the user is needed
-#     # Some clients may have trouble otherwise. See https://core.telegram.org/bots/api#callbackquery
-#     query.answer()
+# Handler input from inline keyboard
+def inline_keyboard_handler(update: Update, context: CallbackContext) -> None:
+    """Parses the CallbackQuery and updates the message text."""
+    query = update.callback_query
 
-#     # Call function from detect_intets.py
-#     response = detect_intent_texts(
-#         config("PROJECT_ID"),
-#         current_chat["session_id"],
-#         config("DIALOGFLOW_LANGUAGE_CODE"),
-#         query.data"
-#     )
-    
-#     update.message.reply_text(response["message"])
+    # CallbackQueries need to be answered, even if no notification to the user is needed
+    # Some clients may have trouble otherwise. See https://core.telegram.org/bots/api#callbackquery
+    query.answer()
 
-    # query.edit_message_text(text=f"Selected option: {query.data}")
+    # Call function from detect_intets.py
+    response = detect_intent_texts(
+        config("PROJECT_ID"),
+        current_chat["session_id"],
+        query.data,
+        config("DIALOGFLOW_LANGUAGE_CODE"),
+    )
 
-def welcome_keyboard() -> ReplyMarkup:
-    keyboard = [
-        [InlineKeyboardButton("Employee Benefits", callback_data="1")],
-        [InlineKeyboardButton("Medical", callback_data="2")],
-        [InlineKeyboardButton("Leave", callback_data="3")],
-        [InlineKeyboardButton("HR Application System", callback_data="4")],
-        [InlineKeyboardButton("Sunway Celcom Package", callback_data="5")],
-    ]
-
-    reply_markup = InlineKeyboardMarkup(keyboard)
-
-    return reply_markup
+    query.edit_message_reply_markup(reply_markup=None)
+    query.from_user.send_message(response["message"])
 
 
-def leave_keyboard() -> ReplyMarkup:
-    keyboard = [
-        [InlineKeyboardButton("Check Leave Balance", callback_data="1")],
-        [InlineKeyboardButton("Apply for Leave", callback_data="2")],
-        [InlineKeyboardButton("Withdraw Leave", callback_data="3")],
-    ]
+def faq_keyboard() -> ReplyMarkup:
+    data = {
+        "List of Employee Benefits": "direct:employee_benefits",
+        "Medical Bill Claim": "direct:claim_medical_bills",
+        "HR Application Error": "direct:hr_application_issues",
+        "Sunway Celcom Package": "direct:sunway_celcom_pkg",
+    }
 
-    reply_markup = InlineKeyboardMarkup(keyboard)
+    inline_keyboard_options = []
 
-    return reply_markup
+    for key, value in data.items():
+        inline_keyboard_options.append([InlineKeyboardButton(key, callback_data=value)])
+
+    return InlineKeyboardMarkup(inline_keyboard_options)
+
+
+# def leave_keyboard() -> ReplyMarkup:
+#     data = {
+#         "Check Leave Balance": "Check Leave Balance",
+#         "Apply for Leave": "Apply Leave",
+#         "Withdraw Leave": "Withdraw Leave",
+#     }
+
+#     inline_keyboard_options = []
+
+#     for key, value in data.items():
+#         inline_keyboard_options.append([InlineKeyboardButton(key, callback_data=value)])
+
+#     return InlineKeyboardMarkup(inline_keyboard_options)
 
 
 if __name__ == "__main__":
