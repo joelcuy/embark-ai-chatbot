@@ -11,7 +11,7 @@ from telegram.ext import (
     MessageHandler,
     Filters,
     CallbackContext,
-    CallbackQueryHandler,
+    CallbackQueryHandler, CommandHandler
 )
 
 # Env Variables Initialization
@@ -21,8 +21,7 @@ os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = config("SESSION_KEY_PATH")
 hashmap = {}
 
 below_confidence_attempts = 0
-fallbackIntentCount = 0
-
+current_chat = {}
 
 def main() -> None:
     updater = Updater(config("BOT_TOKEN"))
@@ -32,7 +31,6 @@ def main() -> None:
         MessageHandler(Filters.text & ~Filters.command, initialize_new_case)
     )
     # updater.dispatcher.add_handler(CallbackQueryHandler(button))
-
     updater.start_polling()
     updater.idle()
 
@@ -42,7 +40,7 @@ def initialize_new_case(update: Update, context: CallbackContext) -> None:
     message_id = update.message.message_id
     date = update.message.date
 
-    ##Dictionary to store Update.message attributes
+    global current_chat
     current_chat = {
         "chat_id": chat_id,
         "message_id": message_id,
@@ -112,28 +110,21 @@ def initialize_new_case(update: Update, context: CallbackContext) -> None:
         update.message.reply_text(response["message"], reply_markup=reply_markup)
 
     elif response["intent"] == "default_fallback_intent":
-        # If unable to process user request for 2 times, forward message
-        if fallbackIntentCount >= 2:
-            # send reply to the user
-            context.bot.send_message(
-                chat_id=update.message.chat_id,
-                reply_to_message_id=update.message.message_id,
-                text="I'm really sorry for not being able to process your request. I'll forward your request to a live HR staff, and they'll get back to you in a bit.",
-            )
+        # send reply to the user
+        context.bot.send_message(
+            chat_id=update.message.chat_id,
+            reply_to_message_id=update.message.message_id,
+            text="I'm really sorry for not being able to process your request. I'll forward your request to a live HR staff.",
+        )
 
-            # Forward the chat to HR channel
-            context.bot.forward_message(
-                chat_id="@demoHRchannel",
-                from_chat_id=update.message.chat_id,
-                message_id=update.message.message_id,
-            )
+        # Forward the chat to HR channel
+        context.bot.forward_message(
+            chat_id="@demoHRchannel",
+            from_chat_id=update.message.chat_id,
+            message_id=update.message.message_id,
+        )
 
-        else:
-            update.message.reply_text(response["message"], reply_markup=reply_markup)
-
-        fallbackIntentCount += 1
-
-
+# # Action after clicking buttons
 # def button(update: Update, context: CallbackContext) -> None:
 #     """Parses the CallbackQuery and updates the message text."""
 #     query = update.callback_query
@@ -142,8 +133,17 @@ def initialize_new_case(update: Update, context: CallbackContext) -> None:
 #     # Some clients may have trouble otherwise. See https://core.telegram.org/bots/api#callbackquery
 #     query.answer()
 
-#     query.edit_message_text(text=f"Selected option: {query.data}")
+#     # Call function from detect_intets.py
+#     response = detect_intent_texts(
+#         config("PROJECT_ID"),
+#         current_chat["session_id"],
+#         config("DIALOGFLOW_LANGUAGE_CODE"),
+#         query.data"
+#     )
+    
+#     update.message.reply_text(response["message"])
 
+    # query.edit_message_text(text=f"Selected option: {query.data}")
 
 def welcome_keyboard() -> ReplyMarkup:
     keyboard = [
