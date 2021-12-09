@@ -2,6 +2,7 @@ import os
 from decouple import config
 from utils import *
 from constants import *
+from db import *
 from detect_intents import detect_intent_texts
 
 from telegram.replymarkup import ReplyMarkup
@@ -15,13 +16,11 @@ from telegram.ext import (
     CommandHandler,
 )
 
+
 # Env Variables Initialization
 os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = config("SESSION_KEY_PATH")
 
-# Mock MongoDB
-hashmap = {}
-
-current_chat = {}
+current_session = {}
 
 
 def main() -> None:
@@ -44,32 +43,28 @@ def initialize_new_case(update: Update, context: CallbackContext) -> None:
         message_id = update.message.message_id
         date = update.message.date
 
-        global current_chat
-        current_chat = {
+        global current_session
+        current_session = {
             "chat_id": chat_id,
             "message_id": message_id,
             "created_at": date,
         }
 
-        """
-        SESSION
-
-        The hashmap (aka object) is to store the people’s chat id and mimic like a session in runtime.
-        """
-        if chat_id not in hashmap:
-            current_chat["session_id"] = generate_session_id()
+        db_data = read_user(chat_id)
+        if db_data is None:
+            current_session["session_id"] = generate_session_id()
         else:
-            last_message_date = hashmap[chat_id]["created_at"]
+            last_message_date = db_data["created_at"]
             if get_mins_from(last_message_date) >= SESSION_EXPIRE_MINS:
-                current_chat["session_id"] = generate_session_id()
+                current_session["session_id"] = generate_session_id()
             else:
-                current_chat["session_id"] = hashmap[chat_id]["session_id"]
+                current_session["session_id"] = db_data["session_id"]
 
-        hashmap[chat_id] = current_chat
+        create_user(chat_id, current_session)
 
         response = detect_intent_texts(
             config("PROJECT_ID"),
-            current_chat["session_id"],
+            current_session["session_id"],
             update.message.text,
             config("DIALOGFLOW_LANGUAGE_CODE"),
         )
@@ -85,7 +80,6 @@ def initialize_new_case(update: Update, context: CallbackContext) -> None:
             "direct:hr_application_issues",
             "direct:sunway_celcom_pkg",
             "default_welcome_intent",
-            "leave_application",
             "check_remaning_leaves",
         ]
 
@@ -116,6 +110,10 @@ def initialize_new_case(update: Update, context: CallbackContext) -> None:
                 message_id=update.message.message_id,
             )
 
+        if response["intent"] == "leave_application":
+            print(update.message.text)
+            update.message.reply_text(response["message"], None)
+
     else:
         if (
             update.channel_post.reply_to_message is not None
@@ -140,7 +138,7 @@ def inline_keyboard_handler(update: Update, context: CallbackContext) -> None:
     # Call function from detect_intets.py
     response = detect_intent_texts(
         config("PROJECT_ID"),
-        current_chat["session_id"],
+        current_session["session_id"],
         query.data,
         config("DIALOGFLOW_LANGUAGE_CODE"),
     )
